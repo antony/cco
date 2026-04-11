@@ -206,6 +206,30 @@ run_linux() {
 		[[ -e "$p" ]] && args+=(--ro-bind "$p" "$p")
 	done
 
+	# 2b) Allow new file creation in $HOME for Claude's lock dirs and
+	# atomic-write temp files, while keeping existing entries read-only
+	# unless they already overlap an explicit writable path.
+	args+=(--bind "$HOME" "$HOME")
+	for item in "$HOME"/.* "$HOME"/*; do
+		[[ "$item" == "$HOME/." || "$item" == "$HOME/.." ]] && continue
+		[[ -L "$item" || ! -e "$item" ]] && continue
+
+		local item_is_writable=false
+		if [[ "$item" == "$PWD_ABS" || "$PWD_ABS" == "$item"/* || "$item" == "$PWD_ABS"/* ]]; then
+			item_is_writable=true
+		else
+			for wp in "${write_paths[@]+"${write_paths[@]}"}"; do
+				if [[ "$item" == "$wp" || "$wp" == "$item"/* || "$item" == "$wp"/* ]]; then
+					item_is_writable=true
+					break
+				fi
+			done
+		fi
+
+		[[ "$item_is_writable" == true ]] && continue
+		args+=(--ro-bind "$item" "$item")
+	done
+
 	# 3) If safe mode enabled, hide the rest of $HOME by default.
 	if [[ "$safe_mode" == true ]]; then
 		args+=(--tmpfs "$HOME")
@@ -628,7 +652,13 @@ run_macos() {
 		printf '(allow file-write* (subpath "%s/Library/Logs"))\n' "$(policy_quote "$HOME")"
 		printf '(allow file-write* (subpath "%s/Library/Application Support"))\n' "$(policy_quote "$HOME")"
 
-		# 6. Keychain access for OAuth token refresh (only if explicitly allowed)
+		# 6. Claude lock dirs and atomic-write temp files in $HOME
+		printf '(allow file-write* (regex #"^%s/\\.claude\\.lock$"))\n' "$(policy_quote "$HOME")"
+		printf '(allow file-write* (regex #"^%s/\\.claude\\.lock/"))\n' "$(policy_quote "$HOME")"
+		printf '(allow file-write* (regex #"^%s/\\.claude\\.json\\.lock"))\n' "$(policy_quote "$HOME")"
+		printf '(allow file-write* (regex #"^%s/\\.claude\\.json\\.tmp\\."))\n' "$(policy_quote "$HOME")"
+
+		# 7. Keychain access for OAuth token refresh (only if explicitly allowed)
 		if [[ "$allow_keychain" == true ]]; then
 			printf '(allow file-read* (subpath "%s/Library/Keychains"))\n' "$(policy_quote "$HOME")"
 			printf '(allow file-read* (subpath "/Library/Keychains"))\n'
