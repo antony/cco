@@ -952,6 +952,10 @@ ensure_refreshable_oauth_credentials() {
 	log "Claude OAuth token expires soon; refreshing once before sandbox startup"
 
 	if ! run_unsandboxed_claude_refresh; then
+		if ! oauth_token_needs_startup_refresh "$expires_at_ms"; then
+			warn "Claude OAuth pre-start refresh did not complete; continuing because credentials are still valid"
+			return 0
+		fi
 		error "Claude refresh did not complete successfully"
 		error "Run plain \`$(get_claude_command)\` once outside the sandbox, then retry cco."
 		exit 1
