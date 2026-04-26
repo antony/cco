@@ -52,10 +52,10 @@ Claude Code runs directly on the host system with full user privileges:
 ### Credential Protection
 - **Runtime extraction**: Each session fetches fresh Claude credentials (macOS Keychain or Linux config file) into a temporary location.
 - **Read/write reality**: Claude's config directories (`~/.claude`, detected config dir, `.claude.json`) are mounted read-write so it can persist preferences and session state.
-- **Credential file access**: Docker uses a temporary credentials mount that is read-only by default and becomes read/write only with `--allow-oauth-refresh`. Native backends expose Claude's normal config paths for CLI compatibility, but `cco` treats backends that cannot safely persist an in-sandbox refresh as non-persisting and refreshes near-expiry OAuth credentials before startup instead.
+- **Credential file access**: Docker uses a temporary credentials mount that is read-only by default and becomes read/write only with `--allow-oauth-refresh`. Native backends expose Claude's normal config paths for CLI compatibility, but `cco` treats backends that cannot safely persist an in-sandbox refresh as non-persisting. For those backends, expired OAuth credentials are repaired before startup and valid near-expiry credentials are refreshed by a background host-side helper.
 - **No image persistence**: Credentials are never baked into the Docker image; temporary files are cleaned up after the session.
-- **Startup credential maintenance**: Before sandbox startup, `cco` may run a one-shot plain `claude -p ...` call on the host when stored OAuth credentials expire soon and the chosen sandbox cannot safely sync an in-sandbox refresh back. It may also offer `security unlock-keychain ...` for locked macOS login keychains over SSH.
-- **Consent boundary**: Keychain unlock recovery still runs only after an interactive confirmation, or automatically when `--yes` / `-y` is supplied. The OAuth maintenance refresh is a fixed `cco`-controlled host action before sandbox startup; it does not grant Claude ongoing general Keychain access or widen the sandbox after startup.
+- **Startup credential maintenance**: Before sandbox startup, `cco` may run a one-shot plain `claude -p ...` call on the host when stored OAuth credentials are already expired and the chosen sandbox cannot safely sync an in-sandbox refresh back. For valid credentials that expire within two hours, `cco` starts a lock-protected background host-side refresh and continues startup. It may also offer `security unlock-keychain ...` for locked macOS login keychains over SSH.
+- **Consent boundary**: Keychain unlock recovery still runs only after an interactive confirmation, or automatically when `--yes` / `-y` is supplied. OAuth maintenance is a fixed `cco`-controlled host action; it does not grant Claude ongoing general Keychain access or widen the sandbox after startup.
 
 ## Threat Model
 
@@ -251,17 +251,17 @@ When enabled (Docker backend only), `cco`:
 - Only enables when explicitly requested via `--allow-oauth-refresh`
 
 ### Startup Credential Maintenance
-**Purpose**: Lets `cco` keep Claude credentials usable before entering the sandbox without giving sandboxed Claude broader write access. When stored OAuth credentials expire soon and the selected backend cannot safely persist an in-sandbox refresh, `cco` runs one fixed plain-Claude refresh on the host. `--yes` still only controls interactive recovery prompts such as unlocking the macOS login keychain over SSH.
+**Purpose**: Lets `cco` keep Claude credentials usable without giving sandboxed Claude broader write access. When stored OAuth credentials are already expired and the selected backend cannot safely persist an in-sandbox refresh, `cco` runs one fixed plain-Claude refresh on the host before startup and verifies the credentials were repaired. When credentials are valid but expire within two hours, `cco` starts a lock-protected background host-side refresh and lets startup continue. `--yes` still only controls interactive recovery prompts such as unlocking the macOS login keychain over SSH.
 
 **Security Implications**:
-- **Host-side command execution before sandboxing**: `cco` may run `security unlock-keychain ...` or a plain `claude -p ...` command on the host before the sandbox starts.
-- **Automatic OAuth maintenance**: The plain-Claude refresh can run without a prompt when expiry is near, so startup does not depend on granting sandboxed Claude home-directory or credential write access.
+- **Host-side command execution around startup**: `cco` may run `security unlock-keychain ...` or a plain `claude -p ...` command on the host before the sandbox starts. The near-expiry OAuth helper can continue in the background after startup begins.
+- **Automatic OAuth maintenance**: The plain-Claude refresh can run without a prompt when credentials are expired or close to expiry, so startup does not depend on granting sandboxed Claude home-directory or credential write access.
 - **Prompt auto-acceptance**: `--yes` does not add new capabilities by itself, but it does make prompt-based recovery actions happen automatically when the preflight detects the relevant failure mode.
 - **Plain-Claude refresh is outside `cco` isolation**: The OAuth recovery helper intentionally runs outside the sandbox so refreshed credentials can land back in the host's normal Claude auth store.
 
 **What this does NOT do**:
 - It does **not** grant Claude unrestricted Keychain access during the session. That still requires `--allow-keychain`, which is a much higher-risk mode.
-- It does **not** make host-side recovery actions available unless the preflight detects a locked keychain or an OAuth credential that expires soon.
+- It does **not** make host-side recovery actions available unless the preflight detects a locked keychain, expired OAuth credentials, or OAuth credentials that expire within two hours.
 - It does **not** make real `$HOME` broadly writable in native Linux sandbox mode.
 
 **Recommendation**:

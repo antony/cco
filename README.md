@@ -237,7 +237,7 @@ cco --deny-path ~/Downloads
 - `--docker-socket` (experimental): Binds the host Docker socket into the sandbox so Claude can control Docker on your machine. This defeats the isolation barrier—avoid unless you explicitly need host Docker access.
 - `--image IMAGE` / `--docker-image IMAGE` (Docker only): Runs `cco` against a specific Docker image instead of the default managed `cco:latest` image. This is useful if you `docker commit` a known-good persistent container yourself and want later `cco` runs to start from that image. With `--pull`, `cco` pulls the chosen image first.
 - `--force-docker-bridge-network` (Docker only): Force bridge networking instead of host networking. By default cco uses `--network=host` when available (Linux, OrbStack). Use this if you need port isolation or want explicit `-p` port forwarding.
-- `--yes` / `-y`: Auto-accept startup recovery prompts such as macOS Keychain unlock before `cco` starts. OAuth tokens that expire soon are refreshed automatically before sandbox startup when the selected backend cannot safely persist an in-sandbox refresh.
+- `--yes` / `-y`: Auto-accept startup recovery prompts such as macOS Keychain unlock before `cco` starts. OAuth maintenance is automatic when needed and is not controlled by `--yes`.
 - `--allow-oauth-refresh` (experimental): Gives the container write access to your Claude credentials so refreshed tokens sync back to the host. Malicious prompts could corrupt or replace those credentials.
 - `--persist` (Docker only, opt-in): Reuses the default persistent container for the current repo instead of starting fresh each run. `cco` starts it for the invocation and stops it again when the run ends.
 - `--persist=NAME` or `--persist NAME`: Selects a specific persistent session for the current repo so you can keep multiple reusable container filesystems side by side.
@@ -522,7 +522,7 @@ cco restore-creds                   # Restore from most recent backup
 cco restore-creds backup-file.json  # Restore from specific backup
 ```
 
-**OAuth refresh feature**: `cco` automatically performs a fixed host-side refresh before startup when credentials expire soon and the selected backend cannot safely persist an in-sandbox refresh. The experimental `--allow-oauth-refresh` mode is different: it enables bidirectional credential sync when sandboxed Claude refreshes expired tokens. It uses race condition protection and creates automatic backups.
+**OAuth refresh feature**: When the selected backend cannot safely persist an in-sandbox refresh, `cco` repairs already-expired Claude OAuth credentials with a fixed host-side Claude call before startup. If stored credentials are still valid but expire within two hours, `cco` starts Claude normally and runs the host-side refresh in the background. The experimental `--allow-oauth-refresh` mode is different: it enables bidirectional credential sync when sandboxed Claude refreshes expired tokens. It uses race condition protection and creates automatic backups.
 
 **Credential management**: Provides manual backup/restore of Claude Code credentials with cross-platform support (macOS Keychain + Linux files).
 
@@ -535,7 +535,7 @@ cco restore-creds backup-file.json  # Restore from specific backup
 
 **Token expiration**
 - If you get authentication errors, your OAuth token may have expired or need a fresh browser login
-- `cco` checks stored OAuth expiry before sandbox startup. When the selected backend cannot safely persist an in-sandbox refresh and the token expires soon, `cco` runs one fixed plain-Claude refresh on the host before entering the sandbox.
+- `cco` checks stored OAuth expiry before sandbox startup. When the selected backend cannot safely persist an in-sandbox refresh, already-expired credentials are repaired before Claude starts. Valid credentials that expire within two hours are refreshed in the background while startup continues.
 - **Fallback**: Run `claude` directly (outside `cco`) to re-authenticate, then retry with `cco`
 - For in-sandbox refresh sync-back, the beta `--allow-oauth-refresh` flag will sync container credentials back to your host. Only use it if you accept the additional credential tampering risk.
 
@@ -555,9 +555,9 @@ cco restore-creds backup-file.json  # Restore from specific backup
 ### Known Issues
 
 **Token expires during active session**
-If Claude stops responding with API errors during an active `cco` session, your OAuth token has likely expired mid-session. `cco` normally refreshes tokens that expire soon before sandbox startup, but a long-running session can still cross the expiry boundary.
+If Claude stops responding with API errors during an active `cco` session, your OAuth token has likely expired mid-session. `cco` normally refreshes valid tokens that expire within two hours in the background during startup, but a long-running session can still cross the expiry boundary.
 
-**Root cause**: Some sandbox backends cannot safely persist Claude's refreshed OAuth credentials back to the host credential store without granting broader credential or home-directory write access. `cco` keeps the sandbox narrow and performs a fixed host-side refresh before startup when it can predict the expiry.
+**Root cause**: Some sandbox backends cannot safely persist Claude's refreshed OAuth credentials back to the host credential store without granting broader credential or home-directory write access. `cco` keeps the sandbox narrow, repairs already-expired credentials before startup, and performs background host-side refresh for valid credentials that are close to expiry.
 
 **Workaround**:
 1. Open a new terminal window
