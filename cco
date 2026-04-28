@@ -1256,10 +1256,88 @@ pull_prebuilt_image() {
 		# Tag as local image name for consistency
 		docker tag "$image_tag" "$IMAGE_NAME" >/dev/null 2>&1
 		log "Successfully pulled pre-built image"
+		offer_old_cco_image_cleanup "$image_tag"
 		return 0
 	else
 		warn "Failed to pull pre-built image, building locally..."
 		return 1
+	fi
+}
+
+list_old_cco_image_refs() {
+	local current_tag="$1"
+	local image_ref
+
+	while IFS= read -r image_ref; do
+		if [[ "$image_ref" == "$current_tag" || "$image_ref" == "ghcr.io/nikvdp/cco:<none>" ]]; then
+			continue
+		fi
+
+		case "$image_ref" in
+		ghcr.io/nikvdp/cco:*)
+			printf '%s\n' "$image_ref"
+			;;
+		esac
+	done < <(docker image ls ghcr.io/nikvdp/cco --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)
+}
+
+confirm_default_no() {
+	local prompt="$1"
+
+	if [[ -t 0 && -t 1 ]]; then
+		echo
+		read -p "$prompt [y/N] " -r
+		if [[ $REPLY =~ ^([Yy])$ ]]; then
+			return 0
+		fi
+	fi
+
+	return 1
+}
+
+remove_old_cco_images() {
+	local image_ref
+	local failed=false
+
+	for image_ref in "$@"; do
+		log "Removing old cco image tag: $image_ref"
+		if ! docker image rm "$image_ref" >/dev/null 2>&1; then
+			warn "Could not remove old cco image tag: $image_ref"
+			failed=true
+		fi
+	done
+
+	[[ "$failed" == false ]]
+}
+
+offer_old_cco_image_cleanup() {
+	local current_tag="$1"
+	local image_ref
+	local old_image_refs=()
+
+	while IFS= read -r image_ref; do
+		[[ -n "$image_ref" ]] && old_image_refs+=("$image_ref")
+	done < <(list_old_cco_image_refs "$current_tag")
+
+	if [[ ${#old_image_refs[@]} -eq 0 ]]; then
+		return 0
+	fi
+
+	warn "Found ${#old_image_refs[@]} old cco Docker image tag(s) from previous pulls"
+	for image_ref in "${old_image_refs[@]}"; do
+		warn "  $image_ref"
+	done
+
+	if [[ "$clean_old_images" == true ]]; then
+		remove_old_cco_images "${old_image_refs[@]}"
+		return
+	fi
+
+	if confirm_default_no "Remove these old cco Docker image tags now?"; then
+		remove_old_cco_images "${old_image_refs[@]}"
+	else
+		log "Keeping old cco Docker image tags"
+		log "Use --clean-old-images with pull or --pull to remove them automatically after a successful pull"
 	fi
 }
 
@@ -2698,6 +2776,7 @@ allow_keychain=false
 enable_background_tasks=false
 rebuild_image=false
 pull_image=false
+clean_old_images=false
 yes_flag=false
 shell_mode=false
 safe_mode=false
@@ -2771,6 +2850,10 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--pull)
 		pull_image=true
+		shift
+		;;
+	--clean-old-images)
+		clean_old_images=true
 		shift
 		;;
 	--docker-socket)
@@ -3104,6 +3187,7 @@ if [[ $# -gt 0 ]]; then
 		echo "Options:"
 		echo "  --rebuild             Force rebuild Docker image"
 		echo "  --pull                Pull latest image before starting"
+		echo "  --clean-old-images    Remove old cco image tags after a successful pull"
 		echo "  --yes, -y             Auto-accept startup recovery prompts"
 		echo "  --version, -v         Show version"
 		echo "  --env, -e KEY=VAL     Set container environment variable"
