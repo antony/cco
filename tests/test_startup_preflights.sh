@@ -147,6 +147,74 @@ else
 fi
 
 echo ""
+echo "Test: Docker image cleanup lists only old cco registry tags"
+if (
+	source "$FUNCTIONS_ONLY"
+	docker() {
+		if [[ "$*" == "image ls ghcr.io/nikvdp/cco --format {{.Repository}}:{{.Tag}}" ]]; then
+			printf '%s\n' \
+				"ghcr.io/nikvdp/cco:current" \
+				"ghcr.io/nikvdp/cco:old-one" \
+				"ghcr.io/nikvdp/cco:<none>" \
+				"other/repo:old"
+			return 0
+		fi
+		return 1
+	}
+	output=$(list_old_cco_image_refs "ghcr.io/nikvdp/cco:current")
+	[[ "$output" == "ghcr.io/nikvdp/cco:old-one" ]]
+); then
+	pass "Docker image cleanup lists only old managed registry tags"
+else
+	fail "Docker image cleanup lists only old managed registry tags"
+fi
+
+echo ""
+echo "Test: Docker image cleanup auto-removes old tags when flag is set"
+if (
+	source "$FUNCTIONS_ONLY"
+	clean_old_images=true
+	removed_refs=()
+	list_old_cco_image_refs() {
+		printf '%s\n' "ghcr.io/nikvdp/cco:old-one" "ghcr.io/nikvdp/cco:old-two"
+	}
+	remove_old_cco_images() {
+		removed_refs=("$@")
+	}
+	offer_old_cco_image_cleanup "ghcr.io/nikvdp/cco:current"
+	[[ ${#removed_refs[@]} -eq 2 ]]
+	[[ "${removed_refs[0]}" == "ghcr.io/nikvdp/cco:old-one" ]]
+	[[ "${removed_refs[1]}" == "ghcr.io/nikvdp/cco:old-two" ]]
+); then
+	pass "Docker image cleanup auto-removes old tags when flag is set"
+else
+	fail "Docker image cleanup auto-removes old tags when flag is set"
+fi
+
+echo ""
+echo "Test: Docker image cleanup skips removal without prompt confirmation"
+if (
+	source "$FUNCTIONS_ONLY"
+	clean_old_images=false
+	removed_count=0
+	list_old_cco_image_refs() {
+		printf '%s\n' "ghcr.io/nikvdp/cco:old-one"
+	}
+	confirm_default_no() {
+		return 1
+	}
+	remove_old_cco_images() {
+		removed_count=$((removed_count + $#))
+	}
+	offer_old_cco_image_cleanup "ghcr.io/nikvdp/cco:current"
+	[[ "$removed_count" -eq 0 ]]
+); then
+	pass "Docker image cleanup skips removal without prompt confirmation"
+else
+	fail "Docker image cleanup skips removal without prompt confirmation"
+fi
+
+echo ""
 echo "Test: OAuth preflight repairs expired credentials before startup"
 if (
 	PATH="$FAKE_BIN:$PATH"
