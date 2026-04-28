@@ -184,6 +184,9 @@ cco --backend auto    # Auto-detect (default)
 # Rebuild the protective layer (Docker mode only, also updates to latest Claude Code version)
 cco --rebuild
 
+# Pull the latest pre-built image and automatically remove older cco image tags
+cco --pull --clean-old-images
+
 # System information and status
 cco --info
 
@@ -236,6 +239,7 @@ cco --deny-path ~/Downloads
 
 - `--docker-socket` (experimental): Binds the host Docker socket into the sandbox so Claude can control Docker on your machine. This defeats the isolation barrier—avoid unless you explicitly need host Docker access.
 - `--image IMAGE` / `--docker-image IMAGE` (Docker only): Runs `cco` against a specific Docker image instead of the default managed `cco:latest` image. This is useful if you `docker commit` a known-good persistent container yourself and want later `cco` runs to start from that image. With `--pull`, `cco` pulls the chosen image first.
+- `--clean-old-images` (Docker only): After a successful pre-built image pull, remove older `ghcr.io/nikvdp/cco:*` tags automatically. Without this flag, `cco` asks before removing old managed image tags when it can prompt.
 - `--force-docker-bridge-network` (Docker only): Force bridge networking instead of host networking. By default cco uses `--network=host` when available (Linux, OrbStack). Use this if you need port isolation or want explicit `-p` port forwarding.
 - `--yes` / `-y`: Auto-accept startup recovery prompts such as macOS Keychain unlock before `cco` starts. OAuth maintenance is automatic when needed and is not controlled by `--yes`.
 - `--allow-oauth-refresh` (experimental): Gives the container write access to your Claude credentials so refreshed tokens sync back to the host. Malicious prompts could corrupt or replace those credentials.
