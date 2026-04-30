@@ -697,6 +697,52 @@ handle_add_dir_entry() {
 	esac
 }
 
+load_project_env_file_into_environment() {
+	if [[ ! -f ".env" ]]; then
+		return
+	fi
+
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		# Match Docker-style comment handling by ignoring leading whitespace.
+		local trimmed_line="${line#"${line%%[![:space:]]*}"}"
+		[[ -z "$trimmed_line" || "$trimmed_line" == \#* ]] && continue
+		[[ "$trimmed_line" != *"="* ]] && continue
+		local env_key="${line%%=*}"
+		local env_val="${line#*=}"
+		export "${env_key}=${env_val}"
+	done <".env"
+}
+
+apply_custom_env_vars_to_environment() {
+	local custom_env env_key env_val
+
+	if ! declare -p custom_env_vars >/dev/null 2>&1; then
+		return
+	fi
+
+	if ((${#custom_env_vars[@]} == 0)); then
+		return
+	fi
+
+	for custom_env in "${custom_env_vars[@]}"; do
+		if [[ "$custom_env" == *"="* ]]; then
+			env_key="${custom_env%%=*}"
+			env_val="${custom_env#*=}"
+			export "${env_key}=${env_val}"
+		else
+			# KEY-only format: pass through from host environment
+			if [[ -n "${!custom_env}" ]]; then
+				export "${custom_env}=${!custom_env}"
+			fi
+		fi
+	done
+}
+
+apply_preflight_environment() {
+	load_project_env_file_into_environment
+	apply_custom_env_vars_to_environment
+}
+
 # Parse additionalDirectories from .claude/settings.local.json.
 load_additional_directories_from_settings() {
 	local settings_file="$PWD/.claude/settings.local.json"
@@ -1997,31 +2043,9 @@ run_native_sandbox() {
 	fi
 
 	# Load .env file first (matching Docker backend behavior)
-	if [[ -f ".env" ]]; then
-		while IFS= read -r line || [[ -n "$line" ]]; do
-			# Match Docker-style comment handling by ignoring leading whitespace.
-			local trimmed_line="${line#"${line%%[![:space:]]*}"}"
-			[[ -z "$trimmed_line" || "$trimmed_line" == \#* ]] && continue
-			[[ "$trimmed_line" != *"="* ]] && continue
-			local env_key="${line%%=*}"
-			local env_val="${line#*=}"
-			export "${env_key}=${env_val}"
-		done <".env"
-	fi
-
+	load_project_env_file_into_environment
 	# Apply custom environment variables after .env so -e flags take precedence
-	for custom_env in "${custom_env_vars[@]}"; do
-		if [[ "$custom_env" == *"="* ]]; then
-			local env_key="${custom_env%%=*}"
-			local env_val="${custom_env#*=}"
-			export "${env_key}=${env_val}"
-		else
-			# KEY-only format: pass through from host environment
-			if [[ -n "${!custom_env}" ]]; then
-				export "${custom_env}=${!custom_env}"
-			fi
-		fi
-	done
+	apply_custom_env_vars_to_environment
 
 	# Execute in sandbox with full environment
 	exec "${cmd[@]}"
@@ -3530,6 +3554,7 @@ main() {
 
 	# Only verify Claude authentication if we need it
 	if needs_claude_authentication; then
+		apply_preflight_environment
 		verify_claude_authentication
 		ensure_refreshable_oauth_credentials
 	fi
