@@ -290,6 +290,176 @@ claude_args_include_permission_mode() {
 	return 1
 }
 
+# bjq is a bashy hack for the tiny bit of jq we need here: simple dot keys
+# plus numeric array indexes. It is intentionally not a jq clone.
+bjq_query_to_path_json() {
+	local raw="$1"
+	local path_json="["
+	local separator=""
+
+	if [[ "$raw" == .* ]]; then
+		raw="${raw#.}"
+	fi
+
+	if [[ -z "$raw" ]]; then
+		return 1
+	fi
+
+	while [[ -n "$raw" ]]; do
+		if [[ "$raw" =~ ^([A-Za-z_][A-Za-z0-9_-]*)(.*)$ ]]; then
+			path_json+="${separator}\"${BASH_REMATCH[1]}\""
+			separator=","
+			raw="${BASH_REMATCH[2]}"
+		elif [[ "$raw" =~ ^\[([0-9]+)\](.*)$ ]]; then
+			path_json+="${separator}${BASH_REMATCH[1]}"
+			separator=","
+			raw="${BASH_REMATCH[2]}"
+		else
+			return 1
+		fi
+
+		if [[ "$raw" == .* ]]; then
+			raw="${raw#.}"
+			if [[ -z "$raw" || "$raw" == .* ]]; then
+				return 1
+			fi
+		fi
+	done
+
+	path_json+="]"
+	printf '%s\n' "$path_json"
+}
+
+bjq() {
+	local query="$1"
+	local json_file="${2:-}"
+	local temp_json_file=""
+	local output_mode="${BJQ_OUTPUT:-value}"
+	local path_json
+
+	path_json=$(bjq_query_to_path_json "$query") || return 2
+
+	if [[ -n "$json_file" && ! -f "$json_file" ]]; then
+		return 1
+	fi
+
+	if command -v jq >/dev/null 2>&1; then
+		local jq_program
+		if [[ "$output_mode" == "type" ]]; then
+			jq_program='
+				def path_lookup($p):
+					reduce $p[] as $part ({ok: true, v: .};
+						if (.ok | not) then .
+						elif ($part | type) == "number" then
+							if ((.v | type) == "array") and ($part >= 0) and ($part < (.v | length)) then {ok: true, v: .v[$part]} else {ok: false, v: null} end
+						else
+							if ((.v | type) == "object") and (.v | has($part)) then {ok: true, v: .v[$part]} else {ok: false, v: null} end
+						end);
+				path_lookup($path) as $result
+				| if $result.ok then $result.v else empty end
+				| type
+			'
+		else
+			jq_program='
+				def path_lookup($p):
+					reduce $p[] as $part ({ok: true, v: .};
+						if (.ok | not) then .
+						elif ($part | type) == "number" then
+							if ((.v | type) == "array") and ($part >= 0) and ($part < (.v | length)) then {ok: true, v: .v[$part]} else {ok: false, v: null} end
+						else
+							if ((.v | type) == "object") and (.v | has($part)) then {ok: true, v: .v[$part]} else {ok: false, v: null} end
+						end);
+				path_lookup($path) as $result
+				| if $result.ok then $result.v else empty end
+				| if type == "string" then .
+				  elif type == "boolean" or type == "number" or type == "null" then tostring
+				  else tojson
+				  end
+			'
+		fi
+
+		if [[ -n "$json_file" ]]; then
+			jq -er --argjson path "$path_json" "$jq_program" "$json_file"
+		else
+			jq -er --argjson path "$path_json" "$jq_program"
+		fi
+		return
+	fi
+
+	if ! command -v python3 >/dev/null 2>&1; then
+		return 127
+	fi
+
+	if [[ -z "$json_file" ]]; then
+		temp_json_file=$(mktemp)
+		cat >"$temp_json_file"
+		json_file="$temp_json_file"
+	fi
+
+	python3 - "$path_json" "$json_file" "$output_mode" <<'PY'
+import json
+import sys
+
+path = json.loads(sys.argv[1])
+json_file = sys.argv[2]
+output_mode = sys.argv[3]
+
+try:
+    with open(json_file, "r", encoding="utf-8") as handle:
+        value = json.load(handle)
+except Exception:
+    sys.exit(2)
+
+try:
+    for part in path:
+        if isinstance(part, int):
+            if not isinstance(value, list) or part >= len(value):
+                sys.exit(1)
+            value = value[part]
+        else:
+            if not isinstance(value, dict) or part not in value:
+                sys.exit(1)
+            value = value[part]
+except Exception:
+    sys.exit(1)
+
+if output_mode == "type":
+    if isinstance(value, str):
+        print("string")
+    elif value is True or value is False:
+        print("boolean")
+    elif value is None:
+        print("null")
+    elif isinstance(value, (int, float)):
+        print("number")
+    elif isinstance(value, list):
+        print("array")
+    elif isinstance(value, dict):
+        print("object")
+    else:
+        sys.exit(1)
+elif isinstance(value, str):
+    print(value)
+elif value is True:
+    print("true")
+elif value is False:
+    print("false")
+elif value is None:
+    print("null")
+elif isinstance(value, (int, float)):
+    print(value)
+else:
+    print(json.dumps(value, separators=(",", ":")))
+PY
+	local status=$?
+	[[ -n "$temp_json_file" ]] && rm -f "$temp_json_file"
+	return "$status"
+}
+
+bjq_type() {
+	BJQ_OUTPUT=type bjq "$@"
+}
+
 read_claude_permission_setting() {
 	local settings_file="$1"
 	local setting_name="$2"
@@ -298,37 +468,7 @@ read_claude_permission_setting() {
 		return 1
 	fi
 
-	if command -v python3 >/dev/null 2>&1; then
-		python3 - "$settings_file" "$setting_name" <<'PY' 2>/dev/null
-import json
-import sys
-
-try:
-    with open(sys.argv[1], "r", encoding="utf-8") as handle:
-        settings = json.load(handle)
-except Exception:
-    sys.exit(1)
-
-permissions = settings.get("permissions")
-if not isinstance(permissions, dict):
-    sys.exit(1)
-
-value = permissions.get(sys.argv[2])
-if isinstance(value, str):
-    print(value)
-    sys.exit(0)
-
-sys.exit(1)
-PY
-		return
-	fi
-
-	if command -v jq >/dev/null 2>&1; then
-		jq -er --arg name "$setting_name" '.permissions[$name] // empty | strings' "$settings_file" 2>/dev/null
-		return
-	fi
-
-	return 1
+	bjq "permissions.$setting_name" "$settings_file" 2>/dev/null
 }
 
 trusted_claude_settings_paths() {
@@ -527,84 +667,44 @@ handle_add_dir_entry() {
 	esac
 }
 
-# Parse additionalDirectories from .claude/settings.local.json
-# Prefer python3 for portability and fall back to jq when available.
+# Parse additionalDirectories from .claude/settings.local.json.
 load_additional_directories_from_settings() {
 	local settings_file="$PWD/.claude/settings.local.json"
 	if [[ ! -f "$settings_file" ]]; then
 		return
 	fi
 
-	local parser=""
-	if command -v python3 &>/dev/null; then
-		parser="python3"
-	elif command -v jq &>/dev/null; then
-		parser="jq"
-	else
-		warn "python3/jq not found; skipping additionalDirectories from $settings_file"
+	local dirs_type parse_status
+	if ! dirs_type=$(bjq_type "additionalDirectories" "$settings_file" 2>/dev/null); then
+		parse_status=$?
+		if [[ $parse_status -eq 127 ]]; then
+			warn "jq/python3 not found; skipping additionalDirectories from $settings_file"
+		elif [[ $parse_status -ne 1 ]]; then
+			warn "Skipping additionalDirectories from $settings_file: Unable to parse settings.local.json"
+		fi
 		return
 	fi
 
-	local dirs parse_output parse_error parse_status
-	if [[ "$parser" == "python3" ]]; then
-		if parse_output=$(
-			python3 - "$settings_file" 2>&1 <<'PY'
-import json
-import sys
-
-try:
-    with open(sys.argv[1], encoding="utf-8") as handle:
-        data = json.load(handle)
-except Exception as exc:
-    print(f"Unable to parse settings.local.json: {exc}", file=sys.stderr)
-    sys.exit(1)
-
-directories = data.get("additionalDirectories", [])
-if directories is None:
-    sys.exit(0)
-if not isinstance(directories, list):
-    print("Unable to parse settings.local.json: additionalDirectories must be an array", file=sys.stderr)
-    sys.exit(1)
-
-for entry in directories:
-    if isinstance(entry, str):
-        print(entry)
-PY
-		); then
-			parse_status=0
-		else
-			parse_status=$?
-		fi
-	else
-		if parse_output=$(jq -r '
-			(.additionalDirectories // []) as $dirs
-			| if ($dirs | type) != "array" then
-				error("Unable to parse settings.local.json: additionalDirectories must be an array")
-			  else
-				$dirs[]
-			  end
-			| select(type == "string")
-		' "$settings_file" 2>&1); then
-			parse_status=0
-		else
-			parse_status=$?
-		fi
-	fi
-
-	if [[ $parse_status -ne 0 ]]; then
-		parse_error=$(printf '%s' "$parse_output" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//')
-		if [[ -z "$parse_error" ]]; then
-			parse_error="Unable to parse settings.local.json"
-		fi
-		warn "Skipping additionalDirectories from $settings_file: $parse_error"
+	if [[ "$dirs_type" == "null" ]]; then
 		return
 	fi
 
-	dirs="$parse_output"
+	if [[ "$dirs_type" != "array" ]]; then
+		warn "Skipping additionalDirectories from $settings_file: Unable to parse settings.local.json: additionalDirectories must be an array"
+		return
+	fi
 
-	local dir
-	while IFS= read -r dir; do
+	local dir dir_type index=0
+	while dir_type=$(bjq_type "additionalDirectories[$index]" "$settings_file" 2>/dev/null); do
+		if [[ "$dir_type" != "string" ]]; then
+			index=$((index + 1))
+			continue
+		fi
+
+		dir=$(bjq "additionalDirectories[$index]" "$settings_file" 2>/dev/null || true)
+		index=$((index + 1))
 		[[ -z "$dir" ]] && continue
+
 		local resolved
 		resolved=$(resolve_path "$dir")
 		if [[ -n "$resolved" && -d "$resolved" ]]; then
@@ -615,7 +715,7 @@ PY
 		else
 			warn "Skipping additionalDirectories entry (not a directory): $dir"
 		fi
-	done <<<"$dirs"
+	done
 }
 
 # Check if Docker is available (only when using Docker backend)
@@ -684,32 +784,9 @@ claude_settings_has_api_key_helper() {
 		return 1
 	fi
 
-	if command -v python3 >/dev/null 2>&1; then
-		python3 - "$settings_file" <<'PY' 2>/dev/null
-import json
-import sys
-
-try:
-    with open(sys.argv[1], "r", encoding="utf-8") as handle:
-        settings = json.load(handle)
-except Exception:
-    sys.exit(1)
-
-api_key_helper = settings.get("apiKeyHelper")
-if isinstance(api_key_helper, str) and api_key_helper.strip():
-    sys.exit(0)
-
-sys.exit(1)
-PY
-		return
-	fi
-
-	if command -v jq >/dev/null 2>&1; then
-		jq -e '(.apiKeyHelper // "") | strings | length > 0' "$settings_file" >/dev/null 2>&1
-		return
-	fi
-
-	return 1
+	local api_key_helper
+	api_key_helper=$(bjq "apiKeyHelper" "$settings_file" 2>/dev/null || true)
+	[[ -n "$api_key_helper" ]]
 }
 
 using_external_claude_auth() {
@@ -840,70 +917,27 @@ get_claude_credentials_payload() {
 
 extract_oauth_expiry_ms() {
 	local credentials_payload="$1"
-	local expires_at="" parse_status=0
+	local expires_at="" query value value_type
 
 	# Prefer the Claude OAuth expiry field, but tolerate the older flat payload shape.
-	if command -v python3 &>/dev/null; then
-		if expires_at=$(
-			python3 - "$credentials_payload" 2>/dev/null <<'PY'
-import json
-import sys
-
-try:
-    data = json.loads(sys.argv[1])
-except Exception:
-    sys.exit(1)
-
-candidates = []
-claude_oauth = data.get("claudeAiOauth")
-if isinstance(claude_oauth, dict):
-    candidates.append(claude_oauth.get("expiresAt"))
-candidates.append(data.get("expiresAt"))
-
-for value in candidates:
-    if isinstance(value, bool):
-        continue
-    if isinstance(value, int):
-        print(value)
-        sys.exit(0)
-    if isinstance(value, float) and value.is_integer():
-        print(int(value))
-        sys.exit(0)
-    if isinstance(value, str) and value.isdigit():
-        print(value)
-        sys.exit(0)
-
-sys.exit(1)
-PY
-		); then
-			parse_status=0
-		else
-			parse_status=$?
+	for query in "claudeAiOauth.expiresAt" "expiresAt"; do
+		value_type=$(printf '%s' "$credentials_payload" | bjq_type "$query" 2>/dev/null || true)
+		if [[ "$value_type" != "number" && "$value_type" != "string" ]]; then
+			continue
 		fi
-	elif command -v jq &>/dev/null; then
-		if expires_at=$(printf '%s' "$credentials_payload" | jq -r '
-			[
-				.claudeAiOauth.expiresAt?,
-				.expiresAt?
-			]
-			| map(
-				if type == "number" then tostring
-				elif type == "string" and test("^[0-9]+$") then .
-				else null
-				end
-			)
-			| map(select(. != null))
-			| .[0] // empty
-		' 2>/dev/null); then
-			parse_status=0
-		else
-			parse_status=$?
-		fi
-	else
-		return 1
-	fi
 
-	if [[ $parse_status -ne 0 || -z "$expires_at" || ! "$expires_at" =~ ^[0-9]+$ ]]; then
+		value=$(printf '%s' "$credentials_payload" | bjq "$query" 2>/dev/null || true)
+		if [[ "$value_type" == "number" && "$value" =~ ^[0-9]+([.]0+)?$ ]]; then
+			expires_at="${value%%.*}"
+			break
+		fi
+		if [[ "$value_type" == "string" && "$value" =~ ^[0-9]+$ ]]; then
+			expires_at="$value"
+			break
+		fi
+	done
+
+	if [[ -z "$expires_at" || ! "$expires_at" =~ ^[0-9]+$ ]]; then
 		return 1
 	fi
 
