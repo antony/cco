@@ -320,10 +320,13 @@ DATABASE_URL=postgres://localhost/mydb
 cco --resume
 cco --model claude-3-5-sonnet-20241022 "write tests"
 cco --no-clipboard "analyze this file"
+cco --permission-mode auto "work through this task"
 
 # Mix cco and Claude options
 cco --env DEBUG=1 --resume  # `cco` + Claude options
 ```
+
+When you pass a Claude permission mode directly, `cco` leaves it alone instead of adding its default bypass flag. If your trusted Claude settings set `permissions.defaultMode` to `auto` and Auto Mode is not disabled, `cco` also lets that default apply.
 
 ### Run Arbitrary Commands (`--command`)
 

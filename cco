@@ -268,6 +268,115 @@ get_command() {
 	fi
 }
 
+claude_args_include_permission_mode() {
+	local arg
+
+	if ! declare -p claude_args >/dev/null 2>&1; then
+		return 1
+	fi
+
+	if ((${#claude_args[@]} == 0)); then
+		return 1
+	fi
+
+	for arg in "${claude_args[@]}"; do
+		case "$arg" in
+		--permission-mode | --permission-mode=* | --dangerously-skip-permissions | --allow-dangerously-skip-permissions)
+			return 0
+			;;
+		esac
+	done
+
+	return 1
+}
+
+read_claude_permission_setting() {
+	local settings_file="$1"
+	local setting_name="$2"
+
+	if [[ ! -f "$settings_file" ]]; then
+		return 1
+	fi
+
+	if command -v python3 >/dev/null 2>&1; then
+		python3 - "$settings_file" "$setting_name" <<'PY' 2>/dev/null
+import json
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as handle:
+        settings = json.load(handle)
+except Exception:
+    sys.exit(1)
+
+permissions = settings.get("permissions")
+if not isinstance(permissions, dict):
+    sys.exit(1)
+
+value = permissions.get(sys.argv[2])
+if isinstance(value, str):
+    print(value)
+    sys.exit(0)
+
+sys.exit(1)
+PY
+		return
+	fi
+
+	if command -v jq >/dev/null 2>&1; then
+		jq -er --arg name "$setting_name" '.permissions[$name] // empty | strings' "$settings_file" 2>/dev/null
+		return
+	fi
+
+	return 1
+}
+
+trusted_claude_settings_paths() {
+	printf '%s\n' "$PWD/.claude/settings.local.json"
+	printf '%s\n' "$(find_claude_config_dir)/settings.json"
+}
+
+claude_auto_mode_disabled() {
+	local settings_file value
+
+	while IFS= read -r settings_file; do
+		value=$(read_claude_permission_setting "$settings_file" "disableAutoMode" || true)
+		if [[ "$value" == "disable" ]]; then
+			return 0
+		fi
+	done < <(trusted_claude_settings_paths)
+
+	return 1
+}
+
+claude_default_permission_mode() {
+	local settings_file value
+
+	while IFS= read -r settings_file; do
+		value=$(read_claude_permission_setting "$settings_file" "defaultMode" || true)
+		if [[ -n "$value" ]]; then
+			printf '%s\n' "$value"
+			return 0
+		fi
+	done < <(trusted_claude_settings_paths)
+
+	return 1
+}
+
+build_claude_permission_args() {
+	claude_permission_args=()
+
+	if claude_args_include_permission_mode; then
+		return
+	fi
+
+	if ! claude_auto_mode_disabled && [[ "$(claude_default_permission_mode || true)" == "auto" ]]; then
+		return
+	fi
+
+	claude_permission_args=("--dangerously-skip-permissions")
+}
+
 # Load agent-specific behavior/policies from dedicated modules.
 if [[ -f "$CCO_INSTALLATION_DIR/lib/agents.sh" ]]; then
 	# shellcheck source=/dev/null
@@ -1748,12 +1857,9 @@ run_native_sandbox() {
 				cmd+=("${cmd_array[@]}" "${claude_args[@]}")
 			fi
 		else
-			# Running Claude - use --dangerously-skip-permissions since we're in a sandbox
-			if [[ ${#claude_args[@]} -eq 0 ]]; then
-				cmd+=("${cmd_array[@]}" "--dangerously-skip-permissions")
-			else
-				cmd+=("${cmd_array[@]}" "--dangerously-skip-permissions" "${claude_args[@]}")
-			fi
+			# Running Claude - use cco's default permission mode unless the user configured one.
+			build_claude_permission_args
+			cmd+=("${cmd_array[@]}" "${claude_permission_args[@]}" "${claude_args[@]}")
 		fi
 	fi
 
@@ -2525,7 +2631,8 @@ run_container() {
 			if [[ -n "$command_flag" || -n "$CCO_COMMAND" ]]; then
 				docker "${exec_args[@]}" "${cmd_array[@]}" "${claude_args[@]}"
 			else
-				docker "${exec_args[@]}" "${cmd_array[@]}" --dangerously-skip-permissions "${claude_args[@]}"
+				build_claude_permission_args
+				docker "${exec_args[@]}" "${cmd_array[@]}" "${claude_permission_args[@]}" "${claude_args[@]}"
 			fi
 		fi
 		local exec_status=$?
@@ -2600,11 +2707,12 @@ run_container() {
 					docker run "${docker_args[@]}" "$IMAGE_NAME" "${cmd_array[@]}" "${claude_args[@]}"
 				fi
 			else
-				# Running Claude - use --dangerously-skip-permissions
+				# Running Claude - use cco's default permission mode unless the user configured one.
+				build_claude_permission_args
 				if [[ -n "$tty_flag" ]]; then
-					docker run "$tty_flag" "${docker_args[@]}" "$IMAGE_NAME" "${cmd_array[@]}" --dangerously-skip-permissions "${claude_args[@]}"
+					docker run "$tty_flag" "${docker_args[@]}" "$IMAGE_NAME" "${cmd_array[@]}" "${claude_permission_args[@]}" "${claude_args[@]}"
 				else
-					docker run "${docker_args[@]}" "$IMAGE_NAME" "${cmd_array[@]}" --dangerously-skip-permissions "${claude_args[@]}"
+					docker run "${docker_args[@]}" "$IMAGE_NAME" "${cmd_array[@]}" "${claude_permission_args[@]}" "${claude_args[@]}"
 				fi
 			fi
 			run_status=$?
@@ -2763,6 +2871,7 @@ restore_credentials() {
 
 # Initialize variables
 claude_args=()
+claude_permission_args=()
 additional_dirs=()
 additional_ro_paths=()
 deny_paths=()

@@ -215,6 +215,63 @@ else
 fi
 
 echo ""
+echo "Test: Claude permission args honor explicit permission mode"
+if (
+	source "$FUNCTIONS_ONLY"
+	claude_args=(--permission-mode auto)
+	claude_permission_args=(stale)
+	build_claude_permission_args
+	[[ ${#claude_permission_args[@]} -eq 0 ]]
+); then
+	pass "explicit Claude permission mode suppresses default bypass flag"
+else
+	fail "explicit Claude permission mode suppresses default bypass flag"
+fi
+
+echo ""
+echo "Test: Claude permission args honor trusted default auto mode"
+if (
+	source "$FUNCTIONS_ONLY"
+	claude_args=()
+	claude_permission_args=(stale)
+	claude_dir="$TEST_ROOT/auto-mode-claude-config"
+	mkdir -p "$claude_dir"
+	printf '{"permissions":{"defaultMode":"auto"}}\n' >"$claude_dir/settings.json"
+	find_claude_config_dir() {
+		printf '%s\n' "$claude_dir"
+	}
+	build_claude_permission_args
+	[[ ${#claude_permission_args[@]} -eq 0 ]]
+); then
+	pass "trusted default auto mode suppresses default bypass flag"
+else
+	fail "trusted default auto mode suppresses default bypass flag"
+fi
+
+echo ""
+echo "Test: Claude permission args keep bypass when auto mode is disabled"
+if (
+	source "$FUNCTIONS_ONLY"
+	claude_args=()
+	claude_permission_args=()
+	default_settings="$TEST_ROOT/auto-default-settings.json"
+	disabled_settings="$TEST_ROOT/auto-disabled-settings.json"
+	printf '{"permissions":{"defaultMode":"auto"}}\n' >"$default_settings"
+	printf '{"permissions":{"disableAutoMode":"disable"}}\n' >"$disabled_settings"
+	trusted_claude_settings_paths() {
+		printf '%s\n' "$disabled_settings"
+		printf '%s\n' "$default_settings"
+	}
+	build_claude_permission_args
+	[[ ${#claude_permission_args[@]} -eq 1 ]]
+	[[ "${claude_permission_args[0]}" == "--dangerously-skip-permissions" ]]
+); then
+	pass "disabled auto mode keeps default bypass flag"
+else
+	fail "disabled auto mode keeps default bypass flag"
+fi
+
+echo ""
 echo "Test: OAuth preflight repairs expired credentials before startup"
 if (
 	PATH="$FAKE_BIN:$PATH"
