@@ -346,6 +346,7 @@ bjq() {
 	if command -v jq >/dev/null 2>&1; then
 		local jq_program
 		if [[ "$output_mode" == "type" ]]; then
+			# shellcheck disable=SC2016
 			jq_program='
 				def path_lookup($p):
 					reduce $p[] as $part ({ok: true, v: .};
@@ -360,6 +361,7 @@ bjq() {
 				| type
 			'
 		else
+			# shellcheck disable=SC2016
 			jq_program='
 				def path_lookup($p):
 					reduce $p[] as $part ({ok: true, v: .};
@@ -457,7 +459,8 @@ PY
 }
 
 bjq_type() {
-	BJQ_OUTPUT=type bjq "$@"
+	local BJQ_OUTPUT=type
+	bjq "$@"
 }
 
 read_claude_permission_setting() {
