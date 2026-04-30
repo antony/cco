@@ -275,6 +275,10 @@ claude_args_include_permission_mode() {
 		return 1
 	fi
 
+	if ((${#claude_args[@]} == 0)); then
+		return 1
+	fi
+
 	for arg in "${claude_args[@]}"; do
 		case "$arg" in
 		--permission-mode | --permission-mode=* | --dangerously-skip-permissions | --allow-dangerously-skip-permissions)
