@@ -196,6 +196,9 @@ eval "$(sed -n '
   /^remove_path_from_array()/,/^}/p
   /^resolve_path()/,/^}/p
   /^add_rw_path()/,/^}/p
+  /^bjq_query_to_path_json()/,/^}/p
+  /^bjq()/,/^}/p
+  /^bjq_type()/,/^}/p
   /^needs_claude_authentication()/,/^}/p
   /^load_additional_directories_from_settings()/,/^}/p
 ' "$CCO_BIN")"

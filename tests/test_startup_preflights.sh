@@ -118,6 +118,13 @@ if (
 	! bjq "missing.key" "$json_file" >/dev/null 2>&1
 	! bjq "items[-1]" "$json_file" >/dev/null 2>&1
 	! bjq "items..name" "$json_file" >/dev/null 2>&1
+	bad_json_file="$TEST_ROOT/bjq-bad.json"
+	printf '{"broken":\n' >"$bad_json_file"
+	if bjq "broken" "$bad_json_file" >/dev/null 2>&1; then
+		false
+	else
+		[[ $? -eq 2 ]]
+	fi
 ); then
 	pass "bjq reads simple paths and array indexes"
 else
@@ -142,6 +149,13 @@ elif (
 	PATH="$fallback_bin"
 	[[ "$(bjq "items[1].name" "$json_file")" == "second" ]]
 	[[ "$(bjq_type "items[0]" "$json_file")" == "object" ]]
+	bad_json_file="$TEST_ROOT/bjq-python-bad.json"
+	printf '{"broken":\n' >"$bad_json_file"
+	if bjq "broken" "$bad_json_file" >/dev/null 2>&1; then
+		false
+	else
+		[[ $? -eq 2 ]]
+	fi
 ); then
 	pass "bjq falls back to python3 when jq is absent"
 else
