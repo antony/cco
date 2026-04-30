@@ -713,6 +713,65 @@ else
 fi
 
 echo ""
+echo "Test: auth file checks are skipped when .env provides ANTHROPIC_API_KEY"
+if (
+	PATH="$FAKE_BIN:$PATH"
+	source "$FUNCTIONS_ONLY"
+	unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
+	export HOME="$TEST_ROOT/dotenv-api-key-home"
+	unset CLAUDE_CONFIG_DIR
+	project_dir="$TEST_ROOT/dotenv-api-key-project"
+	mkdir -p "$project_dir"
+	printf 'ANTHROPIC_API_KEY=dotenv-api-key\n' >"$project_dir/.env"
+	cd "$project_dir"
+	custom_env_vars=()
+	claude_managed_settings_path() {
+		printf '%s\n' "$TEST_ROOT/no-managed-settings.json"
+	}
+	keychain_attempts=0
+	capture_macos_keychain_credentials() {
+		keychain_attempts=$((keychain_attempts + 1))
+		return 1
+	}
+	apply_preflight_environment
+	verify_claude_authentication
+	[[ "$keychain_attempts" -eq 0 ]]
+); then
+	pass "auth file checks are skipped when .env provides Anthropic API key"
+else
+	fail "auth file checks are skipped when .env provides Anthropic API key"
+fi
+
+echo ""
+echo "Test: auth file checks are skipped when --env provides ANTHROPIC_API_KEY"
+if (
+	PATH="$FAKE_BIN:$PATH"
+	source "$FUNCTIONS_ONLY"
+	unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
+	export HOME="$TEST_ROOT/custom-env-api-key-home"
+	unset CLAUDE_CONFIG_DIR
+	project_dir="$TEST_ROOT/custom-env-api-key-project"
+	mkdir -p "$project_dir"
+	cd "$project_dir"
+	custom_env_vars=("ANTHROPIC_API_KEY=custom-env-api-key")
+	claude_managed_settings_path() {
+		printf '%s\n' "$TEST_ROOT/no-managed-settings.json"
+	}
+	keychain_attempts=0
+	capture_macos_keychain_credentials() {
+		keychain_attempts=$((keychain_attempts + 1))
+		return 1
+	}
+	apply_preflight_environment
+	verify_claude_authentication
+	[[ "$keychain_attempts" -eq 0 ]]
+); then
+	pass "auth file checks are skipped when --env provides Anthropic API key"
+else
+	fail "auth file checks are skipped when --env provides Anthropic API key"
+fi
+
+echo ""
 echo "Test: auth file checks are skipped when project settings env has ANTHROPIC_API_KEY"
 if (
 	PATH="$FAKE_BIN:$PATH"
