@@ -476,6 +476,28 @@ trusted_claude_settings_paths() {
 	printf '%s\n' "$(find_claude_config_dir)/settings.json"
 }
 
+claude_managed_settings_path() {
+	case "$(uname -s)" in
+	Darwin)
+		printf '%s\n' "/Library/Application Support/ClaudeCode/managed-settings.json"
+		;;
+	Linux)
+		printf '%s\n' "/etc/claude-code/managed-settings.json"
+		;;
+	esac
+}
+
+claude_external_auth_settings_paths() {
+	local managed_settings user_settings
+	managed_settings=$(claude_managed_settings_path || true)
+	user_settings="$(find_claude_config_dir)/settings.json"
+
+	[[ -n "$managed_settings" ]] && printf '%s\n' "$managed_settings"
+	printf '%s\n' "$PWD/.claude/settings.local.json"
+	printf '%s\n' "$PWD/.claude/settings.json"
+	printf '%s\n' "$user_settings"
+}
+
 claude_auto_mode_disabled() {
 	local settings_file value
 
@@ -776,24 +798,48 @@ find_claude_config_dir() {
 	echo "$primary_dir"
 }
 
-claude_settings_has_api_key_helper() {
-	local settings_file
-	settings_file="$(find_claude_config_dir)/settings.json"
-
+claude_settings_has_nonempty_string() {
+	local settings_file="$1"
+	local query="$2"
+	local value value_type
 	if [[ ! -f "$settings_file" ]]; then
 		return 1
 	fi
 
-	local api_key_helper
-	api_key_helper=$(bjq "apiKeyHelper" "$settings_file" 2>/dev/null || true)
-	[[ -n "$api_key_helper" ]]
+	value_type=$(bjq_type "$query" "$settings_file" 2>/dev/null || true)
+	if [[ "$value_type" != "string" ]]; then
+		return 1
+	fi
+
+	value=$(bjq "$query" "$settings_file" 2>/dev/null || true)
+	[[ "$value" =~ [^[:space:]] ]]
+}
+
+claude_settings_has_external_auth() {
+	local settings_file query
+	local auth_queries=(
+		"apiKeyHelper"
+		"env.ANTHROPIC_API_KEY"
+		"env.ANTHROPIC_AUTH_TOKEN"
+		"env.CLAUDE_CODE_OAUTH_TOKEN"
+	)
+
+	while IFS= read -r settings_file; do
+		for query in "${auth_queries[@]}"; do
+			if claude_settings_has_nonempty_string "$settings_file" "$query"; then
+				return 0
+			fi
+		done
+	done < <(claude_external_auth_settings_paths)
+
+	return 1
 }
 
 using_external_claude_auth() {
 	[[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ||
 		-n "${ANTHROPIC_API_KEY:-}" ||
 		-n "${ANTHROPIC_AUTH_TOKEN:-}" ]] ||
-		claude_settings_has_api_key_helper
+		claude_settings_has_external_auth
 }
 
 get_claude_keychain_account() {
