@@ -26,7 +26,7 @@ info() {
 }
 
 # Configuration
-GITHUB_REPO="nikvdp/cco"
+GITHUB_REPO="antony/cco"
 GITHUB_SSH_URL="git@github.com:${GITHUB_REPO}.git"
 GITHUB_HTTPS_URL="https://github.com/${GITHUB_REPO}.git"
 CCO_INSTALLATION_DIR="$HOME/.local/share/cco"
