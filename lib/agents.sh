@@ -31,6 +31,10 @@ configure_agent_subcommand() {
 		command_flag="pi"
 		configure_pi_mode_paths
 		;;
+	my-pi)
+		command_flag="my-pi"
+		configure_my_pi_mode_paths
+		;;
 	gemini)
 		command_flag="gemini --yolo"
 		configure_gemini_mode_paths
@@ -63,6 +67,9 @@ apply_agent_arg_policies() {
 		;;
 	pi)
 		apply_pi_arg_policies
+		;;
+	my-pi)
+		apply_my_pi_arg_policies
 		;;
 	gemini)
 		apply_gemini_arg_policies
