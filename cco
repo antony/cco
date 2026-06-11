@@ -1650,7 +1650,7 @@ build_image() {
 	# Build from the directory containing the cco script
 	cd "$CCO_INSTALLATION_DIR" || {
 		error "cco installation not found at $CCO_INSTALLATION_DIR"
-		error "Run: curl -fsSL https://raw.githubusercontent.com/nikvdp/cco/master/install.sh | bash"
+		error "Run: curl -fsSL https://raw.githubusercontent.com/antony/cco/master/install.sh | bash"
 		exit 1
 	}
 
