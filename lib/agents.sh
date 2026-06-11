@@ -9,6 +9,8 @@ source "$CCO_INSTALLATION_DIR/lib/agents/opencode.sh"
 # shellcheck source=/dev/null
 source "$CCO_INSTALLATION_DIR/lib/agents/pi.sh"
 # shellcheck source=/dev/null
+source "$CCO_INSTALLATION_DIR/lib/agents/my_pi.sh"
+# shellcheck source=/dev/null
 source "$CCO_INSTALLATION_DIR/lib/agents/gemini.sh"
 
 configure_agent_subcommand() {
