@@ -297,7 +297,7 @@ case "${1:-}" in
 --help | -h)
 	echo "cco installer - a thin protective layer for Claude Code"
 	echo ""
-	echo "Usage: curl -fsSL https://raw.githubusercontent.com/nikvdp/cco/master/install.sh | bash"
+	echo "Usage: curl -fsSL https://raw.githubusercontent.com/antony/cco/master/install.sh | bash"
 	echo ""
 	echo "This script will:"
 	echo "  • Clone cco to ~/.local/share/cco"

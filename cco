@@ -3461,7 +3461,7 @@ if [[ $# -gt 0 ]]; then
 		echo "  droid [args...]     Run Droid CLI in sandbox"
 		echo "  opencode [args...]  Run OpenCode in sandbox"
 		echo "  pi [args...]        Run Pi coding agent in sandbox"
-	echo "  my-pi [args...]     Run My Pi coding agent in sandbox"
+		echo "  my-pi [args...]     Run My Pi coding agent in sandbox"
 		echo "  gemini [args...]    Run Google Gemini CLI in sandbox"
 		echo "  cleanup             Remove all cco containers"
 		echo "  info                Show system info and readiness"
